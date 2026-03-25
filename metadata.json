@@ -1,0 +1,5 @@
+{
+  "name": "VeloMap: Interactive Bike Routes",
+  "description": "Interactive map for cycling routes with elevation profiles, POIs, and real-time weather.",
+  "requestFramePermissions": ["geolocation"]
+}

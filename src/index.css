@@ -1,0 +1,26 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,700;1,700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  body {
+    @apply font-sans antialiased bg-[#0A0A0A] text-white;
+  }
+}
+
+.custom-popup .leaflet-popup-content-wrapper {
+  @apply bg-[#141414] text-white border border-white/10 rounded-2xl shadow-2xl p-0 overflow-hidden;
+}
+
+.custom-popup .leaflet-popup-tip {
+  @apply bg-[#141414];
+}
+
+.leaflet-container {
+  @apply bg-[#0A0A0A];
+}
