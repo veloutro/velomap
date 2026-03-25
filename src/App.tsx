@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useStore, RouteData } from './store';
 import { MOCK_ROUTES } from './mockData';
 import { MapContainer, TileLayer, GeoJSON, Marker, Popup, useMap, LayersControl, useMapEvents } from 'react-leaflet';
@@ -30,7 +30,9 @@ import {
   Sun,
   Camera,
   Maximize2,
-  Copy
+  Copy,
+  Thermometer,
+  CloudRain
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -81,6 +83,47 @@ const MapClickHandler = ({ onMapClick }: { onMapClick: (e: L.LeafletMouseEvent) 
     click: onMapClick,
   });
   return null;
+};
+
+const POIWeather = ({ lat, lon }: { lat: number, lon: number }) => {
+  const [data, setData] = useState<{ temp: number; code: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchWeather = async () => {
+      try {
+        const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`);
+        const json = await res.json();
+        if (json.current_weather) {
+          setData({
+            temp: Math.round(json.current_weather.temperature),
+            code: json.current_weather.weathercode
+          });
+        }
+      } catch (err) {
+        console.error('Weather fetch error:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchWeather();
+  }, [lat, lon]);
+
+  if (loading) return <div className="animate-pulse h-4 w-12 bg-white/5 rounded-md" />;
+  if (!data) return null;
+
+  const getWeatherIcon = (code: number) => {
+    if (code === 0) return <Sun className="w-3.5 h-3.5 text-amber-400" />;
+    if (code <= 3) return <Cloud className="w-3.5 h-3.5 text-neutral-400" />;
+    return <CloudRain className="w-3.5 h-3.5 text-blue-400" />;
+  };
+
+  return (
+    <div className="flex items-center gap-2 px-2.5 py-1.5 bg-white/5 backdrop-blur-md rounded-xl border border-white/10 shadow-sm">
+      {getWeatherIcon(data.code)}
+      <span className="text-[11px] font-mono font-bold text-white">{data.temp}°C</span>
+    </div>
+  );
 };
 
 const MapController = ({ center, selectedRoute, isMobile, drawerState }: { 
@@ -138,6 +181,13 @@ export default function App() {
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
   const [isAddingPOI, setIsAddingPOI] = useState(false);
   const [newPOICoords, setNewPOICoords] = useState<[number, number] | null>(null);
+  const newMarkerRef = useRef<L.Marker>(null);
+
+  useEffect(() => {
+    if (newPOICoords && newMarkerRef.current) {
+      newMarkerRef.current.openPopup();
+    }
+  }, [newPOICoords]);
 
   useEffect(() => {
     if (selectedRouteId) {
@@ -170,8 +220,28 @@ export default function App() {
   });
 
   useEffect(() => {
-    setWeather({ temp: 18, desc: 'Ясно' });
-  }, [selectedRouteId]);
+    const fetchMainWeather = async () => {
+      if (!selectedRoute) {
+        setWeather({ temp: 18, desc: 'Ясно' });
+        return;
+      }
+      try {
+        const [lon, lat] = selectedRoute.geoJson.geometry.coordinates[0];
+        const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`);
+        const json = await res.json();
+        if (json.current_weather) {
+          const code = json.current_weather.weathercode;
+          let desc = 'Ясно';
+          if (code > 0 && code <= 3) desc = 'Переменная облачность';
+          if (code > 3) desc = 'Осадки';
+          setWeather({ temp: Math.round(json.current_weather.temperature), desc });
+        }
+      } catch (err) {
+        setWeather({ temp: 18, desc: 'Ясно' });
+      }
+    };
+    fetchMainWeather();
+  }, [selectedRouteId, selectedRoute]);
 
   const [isEditing, setIsEditing] = useState(false);
   const [editingRoute, setEditingRoute] = useState<RouteData | null>(null);
@@ -613,10 +683,64 @@ export default function App() {
             )}
 
             {newPOICoords && (
-              <Marker position={newPOICoords}>
-                <Popup>
-                  <div className="p-2 text-xs font-bold uppercase tracking-widest">
-                    Новая точка здесь
+              <Marker position={newPOICoords} ref={newMarkerRef}>
+                <Popup className="custom-popup" minWidth={280}>
+                  <div className="p-4 bg-[#141414] border border-white/10 rounded-2xl">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="text-xs font-bold uppercase tracking-widest text-white">Новая точка</h4>
+                      <button 
+                        onClick={() => setNewPOICoords(null)}
+                        className="p-1 hover:bg-white/5 rounded-full transition-colors"
+                      >
+                        <X className="w-4 h-4 text-neutral-500" />
+                      </button>
+                    </div>
+                    
+                    <div className="space-y-3">
+                      <div>
+                        <p className="text-[9px] text-neutral-500 uppercase font-bold tracking-widest mb-1.5">Название</p>
+                        <input 
+                          type="text" 
+                          defaultValue="Новая точка"
+                          placeholder="Название места"
+                          className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-white/20 transition-colors"
+                          id="map-poi-name"
+                        />
+                      </div>
+                      <div>
+                        <p className="text-[9px] text-neutral-500 uppercase font-bold tracking-widest mb-1.5">Описание</p>
+                        <textarea 
+                          placeholder="Краткое описание"
+                          className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-white/20 transition-colors h-20 resize-none"
+                          id="map-poi-desc"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2 text-[9px] font-mono text-neutral-500 uppercase tracking-widest py-1">
+                        <MapPin className="w-3 h-3" />
+                        {newPOICoords[0].toFixed(4)}, {newPOICoords[1].toFixed(4)}
+                      </div>
+                      <button 
+                        onClick={() => {
+                          const name = (document.getElementById('map-poi-name') as HTMLInputElement).value;
+                          const desc = (document.getElementById('map-poi-desc') as HTMLTextAreaElement).value;
+                          if (name && selectedRouteId && newPOICoords) {
+                            addPOI(selectedRouteId, {
+                              id: Math.random().toString(36).substr(2, 9),
+                              name,
+                              description: desc || "Без описания",
+                              coordinates: newPOICoords,
+                              images: [`https://picsum.photos/seed/${Math.random()}/800/600`],
+                              category: 'landmark'
+                            });
+                            setIsAddingPOI(false);
+                            setNewPOICoords(null);
+                          }
+                        }}
+                        className="w-full bg-white text-black py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-neutral-200 transition-colors mt-2"
+                      >
+                        Подтвердить
+                      </button>
+                    </div>
                   </div>
                 </Popup>
               </Marker>
@@ -696,7 +820,10 @@ export default function App() {
                     </div>
 
                     <div className="p-5">
-                      <h4 className="font-serif italic text-xl mb-2 text-white">{poi.name}</h4>
+                      <div className="flex items-start justify-between mb-2">
+                        <h4 className="font-serif italic text-xl text-white">{poi.name}</h4>
+                        <POIWeather lat={poi.coordinates[0]} lon={poi.coordinates[1]} />
+                      </div>
                       <p className="text-sm text-neutral-500 leading-relaxed mb-4 line-clamp-2">{poi.description}</p>
                       <div className="flex items-center justify-between mt-4">
                         <div className="flex items-center gap-2 text-[10px] font-mono text-neutral-300 uppercase tracking-widest">
@@ -1052,58 +1179,11 @@ export default function App() {
                               )}
                             </div>
 
-                            {isAddingPOI && (
+                            {isAddingPOI && !newPOICoords && (
                               <div className="mb-6 p-5 bg-white/5 rounded-2xl border border-white/10 animate-in fade-in slide-in-from-top-4 duration-300">
-                                <p className="text-[10px] text-neutral-400 mb-4 font-medium">
-                                  {newPOICoords 
-                                    ? "Заполните данные для новой точки" 
-                                    : "Кликните на карту, чтобы выбрать местоположение"}
+                                <p className="text-[10px] text-neutral-400 font-medium text-center">
+                                  Кликните на карту, чтобы выбрать местоположение новой точки
                                 </p>
-                                
-                                {newPOICoords && (
-                                  <div className="space-y-4">
-                                    <input 
-                                      type="text" 
-                                      placeholder="Название места"
-                                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-white/20 transition-colors"
-                                      id="new-poi-name"
-                                    />
-                                    <textarea 
-                                      placeholder="Описание"
-                                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-white/20 transition-colors h-24 resize-none"
-                                      id="new-poi-desc"
-                                    />
-                                    <div className="flex gap-3">
-                                      <button 
-                                        onClick={() => {
-                                          const name = (document.getElementById('new-poi-name') as HTMLInputElement).value;
-                                          const desc = (document.getElementById('new-poi-desc') as HTMLTextAreaElement).value;
-                                          if (name && desc && selectedRouteId && newPOICoords) {
-                                            addPOI(selectedRouteId, {
-                                              id: Math.random().toString(36).substr(2, 9),
-                                              name,
-                                              description: desc,
-                                              coordinates: newPOICoords,
-                                              images: ['https://picsum.photos/seed/new-poi/800/600'],
-                                              category: 'landmark'
-                                            });
-                                            setIsAddingPOI(false);
-                                            setNewPOICoords(null);
-                                          }
-                                        }}
-                                        className="flex-1 bg-white text-black py-3 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-neutral-200 transition-colors"
-                                      >
-                                        Сохранить
-                                      </button>
-                                      <button 
-                                        onClick={() => setNewPOICoords(null)}
-                                        className="px-4 border border-white/10 rounded-xl text-neutral-400 hover:bg-white/5 transition-colors"
-                                      >
-                                        <Trash2 className="w-4 h-4" />
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
                               </div>
                             )}
 
@@ -1143,7 +1223,10 @@ export default function App() {
                                       )}
                                     </div>
                                     <div className="p-4">
-                                      <h4 className="font-serif italic text-lg text-white mb-1">{poi.name}</h4>
+                                      <div className="flex items-start justify-between mb-1">
+                                        <h4 className="font-serif italic text-lg text-white">{poi.name}</h4>
+                                        <POIWeather lat={poi.coordinates[0]} lon={poi.coordinates[1]} />
+                                      </div>
                                       <p className="text-xs text-neutral-500 line-clamp-2 mb-3">{poi.description}</p>
                                       <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2 text-[9px] font-mono text-neutral-400 uppercase tracking-widest">
